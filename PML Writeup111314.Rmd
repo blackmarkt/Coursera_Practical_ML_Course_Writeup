@@ -1,0 +1,76 @@
+---
+title: 'Coursera Practical Machine Learning Course Writeup'
+author: "Mark Black"
+date: "Thursday, November 13, 2014"
+output: html_document
+---
+
+## Load the necessary libraries
+```{r}
+library(caret)
+library(randomForest)
+library(rpart)
+```
+## Load the training & testing datasets
+```{r}
+train.fileURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(train.fileURL,dest="train.csv")
+training.pml <- read.csv("train.csv")
+
+test.fileURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(test.fileURL,dest="test.csv")
+testing.pml <- read.csv("test.csv")
+```
+There are alot of NA's in our data frames just from peaking at structure of the training & testing sets.
+## Cleaning the Data
+First extract out all the necessary columns from the data frame containing "belt","forearm","arm","dumbbell" and "classe" from the training set.
+Due to memory issues performing Random Forest we will reduce the training set by 10%.
+```{r}
+# training.pml <- training.pml[,colSums(is.na(training.pml)) != nrow(training.pml)]
+
+cols <- grepl("belt|forearm|arm|dumbbell|classe",colnames(training.pml))
+training.set <- training.pml[,cols]
+testing.set <- testing.pml[,cols]
+training.set <- training.set[sample(nrow(training.set),nrow(training.set)*.10),]
+# testing.set <- testing.set[sample(nrow(testing.set),nrow(testing.set)*.10),]
+```
+Our training set is still too large to process we need to continue shrinking it down using nearZeroVar. Anything with a value TRUE in the nsv is removed from the training set.
+```{r}
+nsv <- nearZeroVar(training.set,saveMetrics=TRUE)
+training.set <- training.set[,nsv$nzv==FALSE]
+testing.set <- testing.set[,nsv$nzv==FALSE]
+```
+Remove columns where NA's exceed 60% of the variables. Thus reducing the number of column variables to 53.
+```{r}
+training.set <- training.set[,(colSums(is.na(training.set))/nrow(training.set))<.60]
+testing.set <- testing.set[,(colSums(is.na(testing.set))/nrow(testing.set))<.60]
+```
+## Training the Model: Perform Cross Validation
+Perform cross validation by splitting the training set into a 70/30 split for training & validation sets respectively.
+```{r}
+set.seed(3232)
+# Data Partition
+training.part <- createDataPartition(training.set$classe,p=0.75,list=FALSE)
+# Training Set
+training.cv <- training.set[training.part,]
+# Validation Set
+training.val <- training.set[-training.part,]
+```
+## Random Forest Model
+The Random Forest model modFit.rf is created and a summary of the performance of the model is output.
+```{r}
+tc <- trainControl(method="cv",number=10)
+modFit.rf <- train(classe~.,training.cv,method="rf",prox=TRUE,trControl=tc)
+modFit.rf
+```
+Now we predict our model against our validation set. Then we see can see how well the model performed using confusionMatrix.
+We would assume that the out of sample error on the validation set would be greater than the in sample error rate on the training set due to overfitting.
+Model achieved a greater than 90% accuracy rate (Out of Sample Error). A higher accuracy rate may be achieved by using the full training set rather than 10%. Unfortunately due to performance issues and computational constraint the training set had to be reduced.
+```{r}
+pred.rf.test <- predict(modFit.rf,training.val)
+predRight <- pred.rf.test==training.val$classe
+confusionMatrix(pred.rf.test,training.val$classe)
+
+table(pred.rf.test,training.val$classe)
+# qplot(pred.rf.test,training.val$classe,colour=predRight,main="Out of Sample Error",xlab="Model Predictio# n for Classe",ylab="Observed Classe")
+```
